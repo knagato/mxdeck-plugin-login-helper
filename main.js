@@ -7,7 +7,8 @@
 const { BrowserWindow, clipboard } = require("electron");
 const path = require("node:path");
 const { loadAll } = require("./lib/definitions");
-const { UserError, collect, commands } = require("./lib/run");
+const { createHash } = require("node:crypto");
+const { UserError, collect, commands, describe } = require("./lib/run");
 const { maskSecrets } = require("./lib/mask");
 const { forLocale } = require("./lib/messages");
 
@@ -58,14 +59,35 @@ exports.activate = (ctx) => {
   let refs = new Map(); // 参照番号 -> 伏せていないコマンド（パネルを閉じるまで、または取り直すまで）
   let nextRef = 1;
 
-  // サインインしているか。保存領域に Cookie が 1 つでもあれば「している」とみなす（中身は見ない）
-  const signedIn = async (id) => (await ctx.sites.session(id).cookies.get({})).length > 0;
+  // サインインしているか。保存領域に Cookie が 1 つでもあれば「している」とみなす。
+  // 定義に describe があれば、どこに（誰として）サインインしているかも添える。
+  // describe は値を読む（localStorage なら画面に出さずにページを開く）ので、Cookie が変わったときだけ読み直す
+  const described = new Map(); // id -> { key, accounts }
+  async function status(def) {
+    const cookies = await ctx.sites.session(def.id).cookies.get({});
+    if (!cookies.length) return { signedIn: false, accounts: [] };
+    if (!def.describe) return { signedIn: true, accounts: [] };
+    const key = createHash("sha256")
+      .update(cookies.map((c) => `${c.domain} ${c.name}=${c.value}`).sort().join("\n"))
+      .digest("hex");
+    const cached = described.get(def.id);
+    if (cached?.key === key) return { signedIn: true, accounts: cached.accounts };
+    let accounts = [];
+    try {
+      accounts = describe(def, await collect(def, readerFor(def)));
+    } catch {
+      accounts = [];
+    }
+    described.set(def.id, { key, accounts });
+    return { signedIn: true, accounts };
+  }
   const statuses = async () =>
-    Object.fromEntries(await Promise.all(loaded.services.map(async (s) => [s.id, await signedIn(s.id)])));
+    Object.fromEntries(await Promise.all(loaded.services.map(async (s) => [s.id, await status(s)])));
 
   ctx.panel.handle("init", async () => {
     reload();
     refs = new Map();
+    described.clear();
     const status = await statuses();
     return {
       lang: i18n.lang,
@@ -75,7 +97,7 @@ exports.activate = (ctx) => {
         name: s.name,
         bridge: s.bridge ? t("forBridge", { bridge: s.bridge }) : "",
         note: i18n.text(s.note),
-        signedIn: status[s.id],
+        status: status[s.id],
         signOutConfirm: t("signOutConfirm", { service: s.name }),
       })),
       errors: loaded.errors,
@@ -95,6 +117,7 @@ exports.activate = (ctx) => {
     await ses.clearStorageData();
     await ses.clearCache();
     for (const [ref, v] of refs) if (v.service === id) refs.delete(ref);
+    described.delete(id);
     return { ok: true, message: t("signedOut", { service: def.name }) };
   });
 

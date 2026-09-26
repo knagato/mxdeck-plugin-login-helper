@@ -112,6 +112,7 @@ test("in mxdeck: sign in, then get the command; the panel never sees the full va
         if (!localStorage.tok) throw new UserError({ en: "no tok", ja: "tok が無い" });
         return [{ title: page, text: "login " + localStorage.tok, secrets: [] }];
       },
+      describe: ({ page }) => [page + " user"],
     };`,
   );
   // 読みに行ったページが別のオリジンへ転送されたら、そこの localStorage は読まない
@@ -221,14 +222,16 @@ test("in mxdeck: sign in, then get the command; the panel never sees the full va
     assert.match(away.message, /Away/); // 「サインインしていない」（読み取りエラーではない）
 
     // サインイン済みの表示と、サインアウト（mxdeck の保存領域を消す）
-    assert.equal((await inPanel(`window.mxdeck.invoke("status")`)).local, true);
+    const st = await inPanel(`window.mxdeck.invoke("status")`);
+    assert.deepEqual(st.local, { signedIn: true, accounts: [] });
+    assert.deepEqual(st["local-js"], { signedIn: true, accounts: ["page user"] });
     const out = await inPanel(`window.mxdeck.invoke("sign-out", "local")`);
     assert.equal(out.ok, true);
     assert.equal(await cookiesIn("local"), 0);
-    assert.equal((await inPanel(`window.mxdeck.invoke("status")`)).local, false);
+    assert.deepEqual((await inPanel(`window.mxdeck.invoke("status")`)).local, { signedIn: false, accounts: [] });
     assert.equal((await inPanel(`window.mxdeck.invoke("get", "local")`)).ok, false);
     // ほかのサービスには触れない
-    assert.equal((await inPanel(`window.mxdeck.invoke("status")`))["local-js"], true);
+    assert.equal((await inPanel(`window.mxdeck.invoke("status")`))["local-js"].signedIn, true);
 
     // 「閉じる」ボタンでパネルが閉じる
     await inPanel(`document.getElementById("close").click()`);

@@ -111,6 +111,11 @@ module.exports = {
 `secrets` lists values that did not come from `cookies` / `localStorage` (those are masked anyway) — for example
 a token found inside a JSON string. Anything not covered would be shown in full.
 
+`describe(values)` (optional) returns labels for **where** the user is signed in — workspace names, a user name —
+shown next to “Signed in” so people can tell which account the command would be for. Return only what is safe to
+show; anything equal to a value read from cookies or local storage is masked anyway. The built-in Slack definition
+lists the signed-in workspaces this way. JSON definitions show only “Signed in”.
+
 JS definitions run inside mxdeck with its full rights, like the plugin itself. Only use files you trust.
 
 ## Development
@@ -159,3 +164,4 @@ mautrix に限らず、Cookie や localStorage の値でログインするブリ
 `plugins.json` のこのプラグインの `config.services` に定義ファイルのパスを並べます（書き方は上の
 [Service definitions](#service-definitions)）。Cookie と localStorage を読んでひな形に埋めるだけなら JSON で書け、
 コードは要りません。読んだ値は列挙しなくても全部伏せます。処理が要るときは JS で書きます（mxdeck と同じ権限で動くので、信頼できるものだけ）。
+JS の定義では `describe` で「どこに（誰として）サインインしているか」を返せ、パネルの「サインイン済み」の横に出ます（Slack はワークスペース名）。

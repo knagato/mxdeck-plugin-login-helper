@@ -8,6 +8,21 @@
 // localStorage は app.slack.com のオリジンのものなので、そのオリジンの軽いページ（robots.txt）で読む。
 // Slack のアプリ本体を読み込まずに済む。
 
+// localConfig_v2 のワークスペースのうち、ブラウザ用のトークン（xoxc-）を持つもの
+function workspacesIn(config) {
+  let teams = [];
+  try {
+    teams = Object.values(JSON.parse(config ?? "{}").teams ?? {});
+  } catch {
+    teams = [];
+  }
+  return teams
+    .filter((t) => t && typeof t.token === "string" && t.token.startsWith("xoxc-"))
+    .map((t) => ({ name: t.name || t.domain || t.id, domain: t.domain || "", token: t.token }));
+}
+
+const titleOf = (ws) => (ws.domain ? `${ws.name} (${ws.domain})` : ws.name);
+
 module.exports = {
   id: "slack",
   name: "Slack",
@@ -18,23 +33,13 @@ module.exports = {
     cookies: { d: { url: "https://slack.com", name: "d" } },
   },
   build({ localStorage, cookies }, { UserError }) {
-    let teams = [];
-    try {
-      teams = Object.values(JSON.parse(localStorage.config ?? "{}").teams ?? {});
-    } catch {
-      teams = [];
-    }
-    const workspaces = teams
-      .filter((t) => t && typeof t.token === "string" && t.token.startsWith("xoxc-"))
-      .map((t) => ({ name: t.name || t.domain || t.id, domain: t.domain || "", token: t.token }));
+    const workspaces = workspacesIn(localStorage.config);
     if (!workspaces.length) throw new UserError("slack_noToken");
     if (!cookies.d) throw new UserError("slack_noCookie");
-    return workspaces.map((ws) => ({
-      title: ws.domain ? `${ws.name} (${ws.domain})` : ws.name,
-      text: `login token ${ws.token} ${cookies.d}`,
-      secrets: [ws.token],
-    }));
+    return workspaces.map((ws) => ({ title: titleOf(ws), text: `login token ${ws.token} ${cookies.d}`, secrets: [ws.token] }));
   },
+  // サインイン中のワークスペース（名前とドメインだけ。トークンは出さない）
+  describe: ({ localStorage, cookies }) => (cookies.d ? workspacesIn(localStorage.config).map(titleOf) : []),
   note: {
     en:
       "Sign in, and when Slack offers the desktop app, choose to use Slack in the browser so the workspace opens. " +

@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const { validate, loadAll } = require("../lib/definitions");
-const { collect, commands, UserError } = require("../lib/run");
+const { collect, commands, describe, UserError } = require("../lib/run");
 const { maskSecrets } = require("../lib/mask");
 const { forLocale } = require("../lib/messages");
 const slack = require("../services/slack");
@@ -100,6 +100,28 @@ test("Slack: one command per workspace, token and d cookie masked", async () => 
   assert.equal(results[0].title, "Team One (one)");
   assert.equal(results[0].text, `login token ${token} ${d}`);
   assert.equal(maskSecrets(results[0].text, results[0].secrets), "login token xoxc***cdef xoxd***BBBB");
+});
+
+test("Slack: describe names the signed-in workspaces, never the token", async () => {
+  const def = validate(slack, { allowCode: true });
+  const token = "xoxc-1111111111-2222222222-abcdef";
+  const config = JSON.stringify({ teams: { T1: { name: "Team One", domain: "one", token } } });
+  const values = await collect(
+    def,
+    fakeReader({ storage: { localConfig_v2: config }, cookies: { "https://slack.com d": "xoxd-zzzzzzzzzzzzzzzz" } }),
+  );
+  assert.deepEqual(describe(def, values), ["Team One (one)"]);
+  assert.deepEqual(describe(def, await collect(def, fakeReader({ storage: { localConfig_v2: config } }))), []);
+});
+
+test("describe: a label that repeats a value it read is masked; JSON cannot describe", async () => {
+  const def = validate(
+    { ...example, command: undefined, build: () => [{ text: "x" }], describe: ({ cookies }) => [`user ${cookies.session}`] },
+    { allowCode: true },
+  );
+  const values = await collect(def, fakeReader({ cookies: { "https://example.com session": "sess-0123456789abcdef" } }));
+  assert.deepEqual(describe(def, values), ["user sess***cdef"]);
+  assert.throws(() => validate({ ...example, describe: () => [] }, { allowCode: false }), /JS/);
 });
 
 test("Slack: not signed in", async () => {
