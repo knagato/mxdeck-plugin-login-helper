@@ -1,0 +1,17 @@
+{
+  "id": "example",
+  "name": "Example service",
+  "bridge": "example-bridge",
+  "signInUrl": "https://example.com/login",
+  "read": {
+    "cookies": {
+      "session": { "url": "https://example.com", "name": "session" },
+      "csrf": { "url": "https://example.com", "name": "csrf_token" }
+    }
+  },
+  "command": "login {session} {csrf}",
+  "note": {
+    "en": "Send it to the bridge bot in its management room.",
+    "ja": "ブリッジ bot との管理ルームに送ってください。"
+  }
+}

@@ -1,0 +1,31 @@
+:root { color-scheme: light dark; }
+body {
+  font: 13px/1.6 -apple-system, "Hiragino Sans", sans-serif;
+  margin: 0;
+  padding: 16px 18px;
+}
+h1 { font-size: 15px; margin: 0 0 12px; }
+.service { border: 1px solid #8884; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+.service header { display: flex; align-items: baseline; gap: 8px; }
+.service h2 { font-size: 14px; margin: 0; }
+.bridge { color: #888; font-size: 11px; }
+.buttons { margin: 8px 0 4px; display: flex; gap: 8px; }
+button { font: inherit; padding: 4px 12px; }
+.note { color: #888; font-size: 11px; margin: 4px 0 0; }
+.status { margin: 6px 0 0; }
+.result { margin-top: 8px; }
+.result b { display: block; font-size: 12px; }
+.cmd {
+  font: 11px ui-monospace, Menlo, monospace;
+  background: #8881;
+  border: 1px solid #8883;
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin: 4px 0;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+.warn { color: #c33; }
+.ok { color: #2a7; }
+.notes { color: #888; font-size: 11px; margin-top: 14px; }
+.notes p { margin: 4px 0; }

@@ -1,0 +1,15 @@
+{
+  "name": "mxdeck-plugin-login-helper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "mxdeck plugin: sign in to a service in its own window and build the login command for its Matrix bridge",
+  "keywords": ["mxdeck", "matrix", "bridge", "mautrix"],
+  "license": "MIT",
+  "author": "knagato (https://github.com/knagato)",
+  "homepage": "https://github.com/knagato/mxdeck-plugin-login-helper#readme",
+  "repository": { "type": "git", "url": "git+https://github.com/knagato/mxdeck-plugin-login-helper.git" },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  },
+  "mxdeck": { "id": "login-helper", "name": "Login Helper", "main": "main.js", "api": 1 }
+}
