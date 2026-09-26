@@ -27,14 +27,41 @@ function renderResults(box, res) {
   }
 }
 
+const cards = new Map(); // id -> setSignedIn(bool)
+
 function renderService(s) {
   const card = el("section", "service");
   const header = el("header");
-  header.append(el("h2", "", s.name), el("span", "bridge", s.bridge));
+  const badge = el("span", "badge");
+  header.append(el("h2", "", s.name), el("span", "bridge", s.bridge), badge);
   const signIn = el("button", "", dict.signIn);
   const get = el("button", "", dict.get);
+  const signOut = el("button", "", dict.signOut);
   const out = el("div");
+  const setSignedIn = (on) => {
+    badge.textContent = on ? dict.signedIn : dict.notSignedInBadge;
+    badge.classList.toggle("on", on);
+    signOut.hidden = !on;
+  };
+  setSignedIn(s.signedIn);
+  cards.set(s.id, setSignedIn);
   signIn.addEventListener("click", () => window.mxdeck.invoke("sign-in", s.id));
+  // 消す前に、何が消えて何が残るかを見せる（ブリッジは止まらない）
+  signOut.addEventListener("click", () => {
+    const box = el("div", "confirm");
+    const yes = el("button", "", dict.signOutDo);
+    const no = el("button", "", dict.cancel);
+    const row = el("div", "buttons");
+    row.append(yes, no);
+    box.append(el("p", "", s.signOutConfirm), row);
+    out.replaceChildren(box);
+    no.addEventListener("click", () => out.replaceChildren());
+    yes.addEventListener("click", async () => {
+      const res = await window.mxdeck.invoke("sign-out", s.id);
+      out.replaceChildren(el("p", `status ${res.ok ? "ok" : "warn"}`, res.message ?? ""));
+      setSignedIn(false);
+    });
+  });
   get.addEventListener("click", async () => {
     get.disabled = true;
     out.replaceChildren(el("p", "status", dict.reading));
@@ -45,7 +72,7 @@ function renderService(s) {
     }
   });
   const buttons = el("div", "buttons");
-  buttons.append(signIn, get);
+  buttons.append(signIn, get, signOut);
   card.append(header);
   if (s.note) card.append(el("p", "note", s.note));
   card.append(buttons, out);
@@ -70,5 +97,11 @@ function renderService(s) {
   if (!init.services.length) list.append(el("p", "", dict.none));
   for (const s of init.services) list.append(renderService(s));
 })();
+
+// サインイン用のウィンドウから戻ってきたら、サインインの表示を直す
+window.addEventListener("focus", async () => {
+  const status = await window.mxdeck.invoke("status");
+  for (const [id, on] of Object.entries(status)) cards.get(id)?.(on);
+});
 
 // Esc と ⌘W では mxdeck がパネルを閉じる

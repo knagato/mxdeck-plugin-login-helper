@@ -10,6 +10,10 @@ h1 { font-size: 15px; margin: 0; }
 .service header { display: flex; align-items: baseline; gap: 8px; }
 .service h2 { font-size: 14px; margin: 0; }
 .bridge { color: #888; font-size: 11px; }
+.badge { margin-left: auto; font-size: 11px; padding: 1px 8px; border-radius: 10px; background: #8882; color: #888; }
+.badge.on { background: #2a72; color: #2a7; }
+.confirm { border-left: 3px solid #c33; padding: 4px 10px; margin: 8px 0; font-size: 12px; }
+.confirm .buttons { margin-bottom: 0; }
 .buttons { margin: 8px 0 4px; display: flex; gap: 8px; }
 button { font: inherit; padding: 4px 12px; }
 .note { color: #888; font-size: 11px; margin: 4px 0 0; }

@@ -58,9 +58,15 @@ exports.activate = (ctx) => {
   let refs = new Map(); // 参照番号 -> 伏せていないコマンド（パネルを閉じるまで、または取り直すまで）
   let nextRef = 1;
 
-  ctx.panel.handle("init", () => {
+  // サインインしているか。保存領域に Cookie が 1 つでもあれば「している」とみなす（中身は見ない）
+  const signedIn = async (id) => (await ctx.sites.session(id).cookies.get({})).length > 0;
+  const statuses = async () =>
+    Object.fromEntries(await Promise.all(loaded.services.map(async (s) => [s.id, await signedIn(s.id)])));
+
+  ctx.panel.handle("init", async () => {
     reload();
     refs = new Map();
+    const status = await statuses();
     return {
       lang: i18n.lang,
       dict: i18n.dict,
@@ -69,9 +75,27 @@ exports.activate = (ctx) => {
         name: s.name,
         bridge: s.bridge ? t("forBridge", { bridge: s.bridge }) : "",
         note: i18n.text(s.note),
+        signedIn: status[s.id],
+        signOutConfirm: t("signOutConfirm", { service: s.name }),
       })),
       errors: loaded.errors,
     };
+  });
+
+  // パネルがフォーカスを取り戻したとき（サインイン用のウィンドウから戻ったとき）に表示を直す
+  ctx.panel.handle("status", statuses);
+
+  // mxdeck に保存したサインイン情報を消す。サービス側のセッションは無効にしないので、
+  // ブリッジに渡したコマンドはそのまま使える（ブリッジも止めたいなら、サービスの中でサインアウトする）
+  ctx.panel.handle("sign-out", async (id) => {
+    const def = find(id);
+    if (!def) return { ok: false };
+    ctx.sites.close?.(def.id);
+    const ses = ctx.sites.session(def.id);
+    await ses.clearStorageData();
+    await ses.clearCache();
+    for (const [ref, v] of refs) if (v.service === id) refs.delete(ref);
+    return { ok: true, message: t("signedOut", { service: def.name }) };
   });
 
   ctx.panel.handle("sign-in", (id) => {
