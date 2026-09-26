@@ -85,9 +85,12 @@ exports.activate = (ctx) => {
     for (const [ref, v] of refs) if (v.service === id) refs.delete(ref);
     try {
       const results = commands(def, await collect(def, readerFor(def)));
+      // 取れたらサインイン用のウィンドウはもう要らない。閉じてもサインインは保存領域に残る
+      // （sites.close の無い古い mxdeck では閉じずにおく）
+      const closed = ctx.sites.close?.(def.id) > 0;
       return {
         ok: true,
-        message: t("ok"),
+        message: closed ? `${t("ok")} ${t("closedWindows", { service: def.name })}` : t("ok"),
         results: results.map((r) => {
           const ref = nextRef++;
           refs.set(ref, { service: id, text: r.text });

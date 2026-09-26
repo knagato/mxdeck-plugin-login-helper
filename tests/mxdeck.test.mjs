@@ -126,7 +126,11 @@ test("in mxdeck: sign in, then get the command; the panel never sees the full va
       command: "login {tok}",
     }),
   );
-  fs.writeFileSync(path.join(tmp, "accounts.json"), JSON.stringify({ accounts: [] }));
+  // アカウントが 0 件だと mxdeck は「追加」のシートを出し、パネル（これもシート）がその後ろで待たされる
+  fs.writeFileSync(
+    path.join(tmp, "accounts.json"),
+    JSON.stringify({ accounts: [{ id: "a", name: "A", url: `${origin}/` }] }),
+  );
   fs.writeFileSync(
     path.join(tmp, "plugins.json"),
     JSON.stringify({ plugins: [{ path: root, config: { services: [jsonDef, jsDef, awayDef] } }] }),
@@ -190,9 +194,18 @@ test("in mxdeck: sign in, then get the command; the panel never sees the full va
     // 保存領域はサービスごと: local でサインインしても local-js には何も入らない
     assert.equal(await cookiesIn("local-js"), 0);
 
+    const siteWindows = (id) =>
+      main.evaluate(`${E}.BrowserWindow.getAllWindows().filter((w) =>
+        w.webContents.session === ${E}.session.fromPartition("persist:plugin-login-helper-${id}")).length`);
+    assert.equal(await siteWindows("local"), 1);
+
     const got = await inPanel(`window.mxdeck.invoke("get", "local")`);
     assert.equal(got.ok, true, got.message);
     assert.equal(got.results[0].masked, "login sess***cdef csrf***3210");
+    // 取れたらサインイン用のウィンドウは閉じる。サインイン（Cookie）は残り、もう一度取れる
+    await sleep(500);
+    assert.equal(await siteWindows("local"), 0);
+    assert.equal((await inPanel(`window.mxdeck.invoke("get", "local")`)).ok, true);
 
     await inPanel(`window.mxdeck.invoke("sign-in", "local-js")`);
     await sleep(1500);
