@@ -8,7 +8,7 @@ const { BrowserWindow, clipboard } = require("electron");
 const path = require("node:path");
 const { loadAll } = require("./lib/definitions");
 const { createHash } = require("node:crypto");
-const { UserError, collect, commands, describe } = require("./lib/run");
+const { UserError, collect, commands, describe, signedIn } = require("./lib/run");
 const { maskSecrets } = require("./lib/mask");
 const { forLocale } = require("./lib/messages");
 
@@ -59,13 +59,13 @@ exports.activate = (ctx) => {
   let refs = new Map(); // 参照番号 -> 伏せていないコマンド（パネルを閉じるまで、または取り直すまで）
   let nextRef = 1;
 
-  // サインインしているか。保存領域に Cookie が 1 つでもあれば「している」とみなす。
+  // サインインしているか。定義の signedInWhen の Cookie が揃っていれば（無ければ Cookie が 1 つでもあれば）「している」。
   // 定義に describe があれば、どこに（誰として）サインインしているかも添える。
   // describe は値を読む（localStorage なら画面に出さずにページを開く）ので、Cookie が変わったときだけ読み直す
   const described = new Map(); // id -> { key, accounts }
   async function status(def) {
     const cookies = await ctx.sites.session(def.id).cookies.get({});
-    if (!cookies.length) return { signedIn: false, accounts: [] };
+    if (!signedIn(def, cookies)) return { signedIn: false, accounts: [] };
     if (!def.describe) return { signedIn: true, accounts: [] };
     const key = createHash("sha256")
       .update(cookies.map((c) => `${c.domain} ${c.name}=${c.value}`).sort().join("\n"))

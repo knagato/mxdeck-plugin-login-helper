@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const { validate, loadAll } = require("../lib/definitions");
-const { collect, commands, describe, UserError } = require("../lib/run");
+const { collect, commands, describe, signedIn, UserError } = require("../lib/run");
 const { maskSecrets } = require("../lib/mask");
 const { forLocale } = require("../lib/messages");
 const slack = require("../services/slack");
@@ -44,6 +44,24 @@ test("JSON definition: a missing value is 'not signed in', never a half-filled c
   assert.throws(() => commands(def, values), (e) => e instanceof UserError && e.userMessage === "notSignedIn");
 });
 
+test("signedInWhen: signed in only when all the named cookies are there", () => {
+  const cookie = (name, value = "v") => ({ domain: ".example.com", name, value });
+  const def = validate({ ...example, signedInWhen: ["auth_token", "ct0"] }, { allowCode: false });
+  // サインイン前から置かれる Cookie だけでは「していない」
+  assert.equal(signedIn(def, [cookie("guest_id"), cookie("personalization_id")]), false);
+  assert.equal(signedIn(def, [cookie("guest_id"), cookie("auth_token")]), false);
+  assert.equal(signedIn(def, [cookie("auth_token", ""), cookie("ct0")]), false);
+  assert.equal(signedIn(def, [cookie("guest_id"), cookie("auth_token"), cookie("ct0")]), true);
+  // 書かなければ、Cookie が 1 つでもあれば「している」
+  const plain = validate({ ...example, signedInWhen: undefined }, { allowCode: false });
+  assert.equal(signedIn(plain, []), false);
+  assert.equal(signedIn(plain, [cookie("guest_id")]), true);
+  // Slack はサインイン前の b Cookie では「していない」
+  const s = validate(slack, { allowCode: true });
+  assert.equal(signedIn(s, [{ domain: ".slack.com", name: "b", value: "x" }]), false);
+  assert.equal(signedIn(s, [{ domain: ".slack.com", name: "d", value: "xoxd-x" }]), true);
+});
+
 test("JSON definitions cannot carry code", () => {
   assert.throws(() => validate({ ...example, command: undefined, build: () => [] }, { allowCode: false }), /JS/);
   assert.throws(
@@ -58,6 +76,9 @@ test("validation", () => {
   bad({ signInUrl: "http://example.com/" }, /https/);
   bad({ command: "login {nope}" }, /nope/);
   bad({ read: {} }, /読むもの/);
+  bad({ signedInWhen: "session" }, /signedInWhen/);
+  bad({ signedInWhen: [] }, /signedInWhen/);
+  bad({ signedInWhen: ["session", ""] }, /signedInWhen/);
   bad(
     { read: { cookies: { a: { url: "https://example.com", name: "a" } }, localStorage: { keys: { a: "k" } } } },
     /重複/,

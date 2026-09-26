@@ -3,6 +3,7 @@
   "name": "Example service",
   "bridge": "example-bridge",
   "signInUrl": "https://example.com/login",
+  "signedInWhen": ["session"],
   "read": {
     "cookies": {
       "session": { "url": "https://example.com", "name": "session" },

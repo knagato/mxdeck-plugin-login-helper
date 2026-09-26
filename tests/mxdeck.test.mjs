@@ -30,6 +30,10 @@ function serve() {
         if (req.url === "/login") {
           res.setHeader("set-cookie", [`session=${SESSION}; HttpOnly; Path=/`, `csrf_token=${CSRF}; Path=/`]);
           res.end(`<title>signed in</title><script>localStorage.setItem("tok", "${TOKEN}")</script>`);
+        } else if (req.url === "/guest") {
+          // サインイン前から Cookie を置くサービス（X の guest_id のようなもの）
+          res.setHeader("set-cookie", ["guest_id=g-0123456789; Path=/"]);
+          res.end("<title>sign in</title>");
         } else if (req.url === "/away") {
           // 別のオリジン（localhost）の /login へ。そこでも tok が置かれるので、オリジンを確かめずに読むと取れてしまう
           const port = req.headers.host.split(":")[1];
@@ -94,10 +98,24 @@ test("in mxdeck: sign in, then get the command; the panel never sees the full va
       name: "Local",
       bridge: "local-bridge",
       signInUrl: `${origin}/login`,
+      signedInWhen: ["session"],
       read: {
         cookies: { session: { url: origin, name: "session" }, csrf: { url: origin, name: "csrf_token" } },
       },
       command: "login {session} {csrf}",
+    }),
+  );
+  // サインインのページを開いただけでは session が無い。Cookie があっても「サインインしていない」
+  const guestDef = path.join(tmp, "guest.json");
+  fs.writeFileSync(
+    guestDef,
+    JSON.stringify({
+      id: "guest",
+      name: "Guest",
+      signInUrl: `${origin}/guest`,
+      signedInWhen: ["session"],
+      read: { cookies: { session: { url: origin, name: "session" } } },
+      command: "login {session}",
     }),
   );
   fs.writeFileSync(
@@ -134,7 +152,7 @@ test("in mxdeck: sign in, then get the command; the panel never sees the full va
   );
   fs.writeFileSync(
     path.join(tmp, "plugins.json"),
-    JSON.stringify({ plugins: [{ path: root, config: { services: [jsonDef, jsDef, awayDef] } }] }),
+    JSON.stringify({ plugins: [{ path: root, config: { services: [jsonDef, jsDef, awayDef, guestDef] } }] }),
   );
 
   const electron = createRequire(path.join(mxdeck, "package.json"))("electron");
@@ -176,7 +194,7 @@ test("in mxdeck: sign in, then get the command; the panel never sees the full va
 
     const init = await inPanel(`window.mxdeck.invoke("init")`);
     assert.deepEqual(init.errors, []);
-    assert.deepEqual(init.services.map((s) => s.id).sort(), ["away", "local", "local-js", "slack"]);
+    assert.deepEqual(init.services.map((s) => s.id).sort(), ["away", "guest", "local", "local-js", "slack"]);
 
     // サインイン前: どちらも「サインインしていない」
     const before = await inPanel(`window.mxdeck.invoke("get", "local")`);
@@ -221,10 +239,15 @@ test("in mxdeck: sign in, then get the command; the panel never sees the full va
     assert.equal(away.ok, false, "転送先のオリジンで読んではいけない");
     assert.match(away.message, /Away/); // 「サインインしていない」（読み取りエラーではない）
 
+    await inPanel(`window.mxdeck.invoke("sign-in", "guest")`);
+    await sleep(1500);
+    assert.equal(await cookiesIn("guest"), 1);
+
     // サインイン済みの表示と、サインアウト（mxdeck の保存領域を消す）
     const st = await inPanel(`window.mxdeck.invoke("status")`);
     assert.deepEqual(st.local, { signedIn: true, accounts: [] });
     assert.deepEqual(st["local-js"], { signedIn: true, accounts: ["page user"] });
+    assert.deepEqual(st.guest, { signedIn: false, accounts: [] }, "guest_id だけではサインインしていない");
     const out = await inPanel(`window.mxdeck.invoke("sign-out", "local")`);
     assert.equal(out.ok, true);
     assert.equal(await cookiesIn("local"), 0);

@@ -28,6 +28,8 @@ module.exports = {
   name: "Slack",
   bridge: "mautrix-slack",
   signInUrl: "https://slack.com/signin",
+  // サインイン前のページも b などの Cookie を置くので、"d" があるかで見る
+  signedInWhen: ["d"],
   read: {
     localStorage: { url: "https://app.slack.com/robots.txt", keys: { config: "localConfig_v2" } },
     cookies: { d: { url: "https://slack.com", name: "d" } },
