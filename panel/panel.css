@@ -4,7 +4,8 @@ body {
   margin: 0;
   padding: 16px 18px;
 }
-h1 { font-size: 15px; margin: 0 0 12px; }
+.top { display: flex; align-items: center; justify-content: space-between; margin: 0 0 12px; }
+h1 { font-size: 15px; margin: 0; }
 .service { border: 1px solid #8884; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
 .service header { display: flex; align-items: baseline; gap: 8px; }
 .service h2 { font-size: 14px; margin: 0; }

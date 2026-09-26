@@ -57,6 +57,9 @@ function renderService(s) {
   dict = init.dict;
   document.documentElement.lang = init.lang;
   $("title").textContent = dict.title;
+  $("close").textContent = dict.close;
+  $("close").title = `${dict.close} (Esc)`;
+  $("close").addEventListener("click", () => window.mxdeck.close());
   for (const k of ["maskedNote", "storageNote", "safetyNote"]) $(k).textContent = dict[k];
   if (init.errors.length) {
     $("errors").hidden = false;
@@ -68,6 +71,4 @@ function renderService(s) {
   for (const s of init.services) list.append(renderService(s));
 })();
 
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") window.mxdeck.close();
-});
+// Esc と ⌘W では mxdeck がパネルを閉じる

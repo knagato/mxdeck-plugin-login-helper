@@ -207,6 +207,14 @@ test("in mxdeck: sign in, then get the command; the panel never sees the full va
     assert.equal(away.ok, false, "転送先のオリジンで読んではいけない");
     assert.match(away.message, /Away/); // 「サインインしていない」（読み取りエラーではない）
 
+    // 「閉じる」ボタンでパネルが閉じる
+    await inPanel(`document.getElementById("close").click()`);
+    await sleep(500);
+    const panels = await main.evaluate(
+      `${E}.BrowserWindow.getAllWindows().filter((w) => w.webContents.getURL().endsWith("panel/panel.html")).length`,
+    );
+    assert.equal(panels, 0, "閉じるボタンで閉じていない");
+
     // パネルに渡ったものに、伏せていない値は無い
     const seen = JSON.stringify([got, gotJs]);
     for (const secret of [SESSION, CSRF, TOKEN]) assert.ok(!seen.includes(secret), secret);
