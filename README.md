@@ -54,6 +54,16 @@ Add your own services with files listed in the plugin's `config` in mxdeck's `pl
 }
 ```
 
+An entry can also be `{ "file": "…", "options": { … } }`, which hands `options` to a JS definition exported as a
+function (see [below](#one-file-several-definitions)):
+
+```json
+"services": [
+  "~/bridges/example.json",
+  { "file": "~/bridges/x.js", "options": { "accounts": ["sub", "work"] } }
+]
+```
+
 The panel re-reads the files each time it opens. A definition with the same `id` as a built-in one replaces it.
 
 ### JSON: cookies and local storage into a command
@@ -118,6 +128,28 @@ shown next to “Signed in” so people can tell which account the command would
 show; anything equal to a value read from cookies or local storage is masked anyway. The built-in Slack definition
 lists the signed-in workspaces this way. JSON definitions show only “Signed in”.
 
+#### One file, several definitions
+
+A JS file may also export an array of definitions, or `function (options)` returning one definition or an array.
+`options` is the object given next to `file` in `config.services` (`{}` if none). This lets one file serve
+several accounts, each with its own `id` and so its own storage:
+
+```js
+module.exports = function ({ accounts = ["main"] }) {
+  return accounts.map((account) => ({
+    id: `example-${account}`,
+    name: `Example (${account})`,
+    signInUrl: "https://example.com/login",
+    read: { cookies: { session: { url: "https://example.com", name: "session" } } },
+    command: "login {session}",
+  }));
+};
+```
+
+The function must return synchronously. `options` is an error for a JSON file and for a JS file that does not
+export a function. Each definition is checked on its own: a broken one is listed in the panel with its `id`,
+and the others still load. Two definitions with the same `id` in one file is an error.
+
 JS definitions run inside mxdeck with its full rights, like the plugin itself. Only use files you trust.
 
 ## Development
@@ -164,7 +196,9 @@ mautrix に限らず、Cookie や localStorage の値でログインするブリ
 ### サービスを足す
 
 `plugins.json` のこのプラグインの `config.services` に定義ファイルのパスを並べます（書き方は上の
-[Service definitions](#service-definitions)）。Cookie と localStorage を読んでひな形に埋めるだけなら JSON で書け、
+[Service definitions](#service-definitions)）。パスの代わりに `{ "file": "…", "options": { … } }` とも書け、
+`options` は `function (options)` を export した JS の定義に渡ります。その関数は定義を 1 つか配列で返せるので
+（同期で）、1 つのファイルで複数のアカウントを `id` を分けて定義できます。Cookie と localStorage を読んでひな形に埋めるだけなら JSON で書け、
 コードは要りません。読んだ値は列挙しなくても全部伏せます。
 `signedInWhen` にサインイン後にだけ置かれる Cookie の名前を並べると（X なら `["auth_token"]`）、それが全部そろったときだけ「サインイン済み」と出します。
 書かなければ Cookie が 1 つでもあれば「サインイン済み」とみなすので、サインイン前から Cookie を置くサービスでは書いてください。処理が要るときは JS で書きます（mxdeck と同じ権限で動くので、信頼できるものだけ）。

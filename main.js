@@ -18,7 +18,8 @@ const LOAD_TIMEOUT_MS = 30_000;
 exports.activate = (ctx) => {
   const i18n = forLocale(ctx.locale);
   const { t } = i18n;
-  const extra = Array.isArray(ctx.config.services) ? ctx.config.services.map(String) : [];
+  // 要素はパスか { file, options }。形の検査は loadAll がして、誤りはパネルに出す
+  const extra = Array.isArray(ctx.config.services) ? ctx.config.services : [];
   let loaded = loadAll({ builtinDir: path.join(__dirname, "services"), extra });
 
   // パネルを開くたびに読み直す（外部の定義ファイルを直したら、再起動せずに反映される）

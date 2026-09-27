@@ -145,6 +145,16 @@ test("in mxdeck: sign in, then get the command; the panel never sees the full va
       command: "login {tok}",
     }),
   );
+  // { file, options } で渡した options から、定義を複数つくる
+  const factoryDef = path.join(tmp, "factory.js");
+  fs.writeFileSync(
+    factoryDef,
+    `module.exports = (options) => options.accounts.map((a) => ({
+      id: "multi-" + a, name: "Multi " + a, signInUrl: ${JSON.stringify(`${origin}/login`)},
+      read: { cookies: { session: { url: ${JSON.stringify(origin)}, name: "session" } } },
+      command: "login {session}",
+    }));`,
+  );
   // アカウントが 0 件だと mxdeck は「追加」のシートを出し、パネル（これもシート）がその後ろで待たされる
   fs.writeFileSync(
     path.join(tmp, "accounts.json"),
@@ -152,7 +162,7 @@ test("in mxdeck: sign in, then get the command; the panel never sees the full va
   );
   fs.writeFileSync(
     path.join(tmp, "plugins.json"),
-    JSON.stringify({ plugins: [{ path: root, config: { services: [jsonDef, jsDef, awayDef, guestDef] } }] }),
+    JSON.stringify({ plugins: [{ path: root, config: { services: [jsonDef, jsDef, awayDef, guestDef, { file: factoryDef, options: { accounts: ["a", "b"] } }] } }] }),
   );
 
   const electron = createRequire(path.join(mxdeck, "package.json"))("electron");
@@ -194,7 +204,7 @@ test("in mxdeck: sign in, then get the command; the panel never sees the full va
 
     const init = await inPanel(`window.mxdeck.invoke("init")`);
     assert.deepEqual(init.errors, []);
-    assert.deepEqual(init.services.map((s) => s.id).sort(), ["away", "guest", "local", "local-js", "slack"]);
+    assert.deepEqual(init.services.map((s) => s.id).sort(), ["away", "guest", "local", "local-js", "multi-a", "multi-b", "slack"]);
 
     // サインイン前: どちらも「サインインしていない」
     const before = await inPanel(`window.mxdeck.invoke("get", "local")`);

@@ -102,6 +102,73 @@ test("loadAll: built-ins plus extra files; broken ones are reported, not fatal; 
   assert.match(errors[0].file, /broken/);
 });
 
+test("loadAll: { file, options } passes options to a JS definition exported as a function, which may return several", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lh-"));
+  const factory = path.join(dir, "factory.js");
+  fs.writeFileSync(
+    factory,
+    `module.exports = function (options) {
+      return options.accounts.map((a) => ({
+        id: "x-" + a, name: "X (" + a + ")", signInUrl: "https://x.com/login",
+        read: { cookies: { t: { url: "https://x.com", name: "auth_token" } } },
+        build: ({ cookies }) => [{ title: a, text: "login " + cookies.t }],
+      }));
+    };`,
+  );
+  const single = path.join(dir, "single.js");
+  fs.writeFileSync(single, `module.exports = (o) => (${JSON.stringify(example)});`);
+  const { services, errors } = loadAll({
+    builtinDir: path.join(root, "services"),
+    extra: [{ file: factory, options: { accounts: ["sub", "work"] } }, single],
+  });
+  assert.deepEqual(errors, []);
+  assert.deepEqual(services.map((s) => s.id).sort(), ["example", "slack", "x-sub", "x-work"]);
+  assert.equal(services.find((s) => s.id === "x-work").name, "X (work)");
+});
+
+test("loadAll: bad entries and definitions are reported per entry, the good ones still load", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lh-"));
+  const json = path.join(dir, "example.json");
+  fs.writeFileSync(json, JSON.stringify(example));
+  const obj = path.join(dir, "obj.js");
+  fs.writeFileSync(obj, `module.exports = ${JSON.stringify(example)};`);
+  const mixed = path.join(dir, "mixed.js");
+  fs.writeFileSync(
+    mixed,
+    `module.exports = () => [${JSON.stringify({ ...example, id: "ok" })}, ${JSON.stringify({ ...example, id: "bad", signInUrl: "http://x" })},
+      ${JSON.stringify({ ...example, id: "ok" })}];`,
+  );
+  const async = path.join(dir, "async.js");
+  fs.writeFileSync(async, `module.exports = async () => (${JSON.stringify(example)});`);
+  const empty = path.join(dir, "empty.js");
+  fs.writeFileSync(empty, `module.exports = () => [];`);
+  const { services, errors } = loadAll({
+    builtinDir: path.join(root, "services"),
+    extra: [
+      { file: json, options: {} }, // JSON は options を受け取れない
+      { file: obj, options: {} }, // 関数でなければ options は渡せない
+      { file: obj, options: ["a"] },
+      { options: {} },
+      42,
+      mixed,
+      async,
+      empty,
+    ],
+  });
+  assert.deepEqual(services.map((s) => s.id).sort(), ["ok", "slack"]);
+  const messages = errors.map((e) => `${path.basename(e.file)}: ${e.message}`);
+  assert.equal(messages.length, 9);
+  assert.match(messages[0], /^example\.json: options は JS/);
+  assert.match(messages[1], /^obj\.js: options を渡すには/);
+  assert.match(messages[2], /^obj\.js: options はオブジェクト/);
+  assert.match(messages[3], /services の要素は/);
+  assert.match(messages[4], /^42: services の要素は/);
+  assert.match(messages[5], /^mixed\.js: \[bad\] .*https/);
+  assert.match(messages[6], /^mixed\.js: \[ok\] .*重複/);
+  assert.match(messages[7], /^async\.js: .*async/);
+  assert.match(messages[8], /^empty\.js: 定義が 1 つも/);
+});
+
 test("Slack: one command per workspace, token and d cookie masked", async () => {
   const def = validate(slack, { allowCode: true });
   const token = "xoxc-1111111111-2222222222-abcdef";
