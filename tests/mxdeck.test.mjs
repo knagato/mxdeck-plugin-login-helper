@@ -21,6 +21,7 @@ const hasMxdeck = fs.existsSync(path.join(mxdeck, "src", "plugins.js"));
 const SESSION = "sess-0123456789abcdef";
 const CSRF = "csrf-fedcba9876543210";
 const TOKEN = "tok-aaaaaaaaaaaaaaaa";
+const EVAL_TIMEOUT_MS = 30_000;
 
 function serve() {
   return new Promise((resolve) => {
@@ -59,17 +60,27 @@ async function inspector(child) {
     timer = setTimeout(() => reject(new Error(`no inspector: ${buf}`)), 20_000);
   }).finally(() => clearTimeout(timer));
   const ws = new WebSocket(url);
-  await new Promise((r) => ws.addEventListener("open", r, { once: true }));
+  await new Promise((resolve, reject) => {
+    ws.addEventListener("open", resolve, { once: true });
+    ws.addEventListener("error", () => reject(new Error(`inspector: cannot connect to ${url}`)), { once: true });
+  });
   let id = 0;
   const pending = new Map();
   ws.addEventListener("message", (e) => {
     const msg = JSON.parse(e.data);
     pending.get(msg.id)?.(msg);
   });
+  // 止まったら、待ち続けずに何を評価していたかを出して落ちる
   const evaluate = (expression) =>
     new Promise((resolve, reject) => {
       const n = ++id;
+      const timer = setTimeout(() => {
+        pending.delete(n);
+        reject(new Error(`no answer in ${EVAL_TIMEOUT_MS} ms: ${expression.replace(/\s+/g, " ").slice(0, 160)}`));
+      }, EVAL_TIMEOUT_MS);
       pending.set(n, (msg) => {
+        clearTimeout(timer);
+        pending.delete(n);
         const r = msg.result;
         if (msg.error || r?.exceptionDetails) reject(new Error(JSON.stringify(msg.error ?? r.exceptionDetails)));
         else resolve(r.result.value);
@@ -85,10 +96,19 @@ async function inspector(child) {
   return { evaluate, close: () => ws.close() };
 }
 
-test("in mxdeck: sign in, then get the command; the panel never sees the full values", { skip: !hasMxdeck && "mxdeck not found" }, async () => {
+test("in mxdeck: sign in, then get the command; the panel never sees the full values", { skip: !hasMxdeck && "mxdeck not found", timeout: 120_000 }, async (t) => {
   const server = await serve();
   const origin = `http://127.0.0.1:${server.address().port}`;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "lh-mxdeck-"));
+  let child, main;
+  // 後始末は t.after で。タイムアウトしたときは finally が走らず、Electron が残って node が終わらなくなる
+  t.after(() => {
+    main?.close();
+    child?.kill("SIGKILL");
+    server.close();
+    server.closeAllConnections();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
   const jsonDef = path.join(tmp, "local.json");
   const jsDef = path.join(tmp, "local-js.js");
   fs.writeFileSync(
@@ -178,7 +198,7 @@ test("in mxdeck: sign in, then get the command; the panel never sees the full va
   );
 
   const electron = createRequire(path.join(mxdeck, "package.json"))("electron");
-  const child = spawn(electron, [mxdeck, "--inspect=0"], {
+  child = spawn(electron, [mxdeck, "--inspect=0"], {
     env: {
       ...process.env,
       MXDECK_USER_DATA: path.join(tmp, "ud"),
@@ -187,117 +207,109 @@ test("in mxdeck: sign in, then get the command; the panel never sees the full va
     },
     stdio: ["ignore", "ignore", "pipe"],
   });
-  const main = await inspector(child);
-  try {
-    const E = `process.mainModule.require("electron")`;
-    // 起動を待ってから（inspector は起動処理の途中から繋がる）、プラグインのメニュー項目を押してパネルを開く
-    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    for (let i = 0; ; i++) {
-      await sleep(300);
-      const ready = await main
-        .evaluate(`!!process.mainModule && ${E}.app.isReady() && !!${E}.Menu.getApplicationMenu()`)
-        .catch(() => false);
-      if (ready) break;
-      if (i > 60) throw new Error("mxdeck did not start");
-    }
-    await main.evaluate(`(() => {
-      const menu = ${E}.Menu.getApplicationMenu().items.find((i) => i.label === "プラグイン");
-      menu.submenu.items.find((i) => /Bridge login|ブリッジのログイン/.test(i.label)).click();
-    })()`);
-    const inPanel = (js) =>
-      main.evaluate(`(async () => {
-        for (let i = 0; i < 50; i++) {
-          const w = ${E}.BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().endsWith("panel/panel.html"));
-          if (w && !w.webContents.isLoading()) return w.webContents.executeJavaScript(${JSON.stringify(js)});
-          await new Promise((r) => setTimeout(r, 200));
-        }
-        throw new Error("panel did not open");
-      })()`);
-
-    const init = await inPanel(`window.mxdeck.invoke("init")`);
-    assert.deepEqual(init.errors, []);
-    assert.deepEqual(init.services.map((s) => s.id).sort(), ["away", "guest", "guest-plain", "local", "local-js", "multi-a", "multi-b", "slack"]);
-
-    // サインイン前: どちらも「サインインしていない」
-    const before = await inPanel(`window.mxdeck.invoke("get", "local")`);
-    assert.equal(before.ok, false);
-    assert.match(before.message, /Local/);
-    const beforeJs = await inPanel(`window.mxdeck.invoke("get", "local-js")`);
-    assert.equal(beforeJs.ok, false);
-    assert.match(beforeJs.message, /tok/);
-
-    // サインイン（サイト用ウィンドウが /login を開き、Cookie と localStorage が入る）
-    const cookiesIn = (id) =>
-      main.evaluate(`${E}.session.fromPartition("persist:plugin-login-helper-${id}").cookies.get({}).then((c) => c.length)`);
-    await inPanel(`window.mxdeck.invoke("sign-in", "local")`);
-    await sleep(1500);
-    assert.equal(await cookiesIn("local"), 2);
-    // 保存領域はサービスごと: local でサインインしても local-js には何も入らない
-    assert.equal(await cookiesIn("local-js"), 0);
-
-    const siteWindows = (id) =>
-      main.evaluate(`${E}.BrowserWindow.getAllWindows().filter((w) =>
-        w.webContents.session === ${E}.session.fromPartition("persist:plugin-login-helper-${id}")).length`);
-    assert.equal(await siteWindows("local"), 1);
-
-    const got = await inPanel(`window.mxdeck.invoke("get", "local")`);
-    assert.equal(got.ok, true, got.message);
-    assert.equal(got.results[0].masked, "login sess***cdef csrf***3210");
-    // 取れたらサインイン用のウィンドウは閉じる。サインイン（Cookie）は残り、もう一度取れる
-    await sleep(500);
-    assert.equal(await siteWindows("local"), 0);
-    assert.equal((await inPanel(`window.mxdeck.invoke("get", "local")`)).ok, true);
-
-    await inPanel(`window.mxdeck.invoke("sign-in", "local-js")`);
-    await sleep(1500);
-    const gotJs = await inPanel(`window.mxdeck.invoke("get", "local-js")`);
-    assert.equal(gotJs.ok, true, gotJs.message);
-    assert.equal(gotJs.results[0].title, "page");
-    assert.equal(gotJs.results[0].masked, "login tok-***aaaa");
-
-    await inPanel(`window.mxdeck.invoke("sign-in", "away")`);
-    await sleep(1500);
-    const away = await inPanel(`window.mxdeck.invoke("get", "away")`);
-    assert.equal(away.ok, false, "転送先のオリジンで読んではいけない");
-    assert.match(away.message, /Away/); // 「サインインしていない」（読み取りエラーではない）
-
-    await inPanel(`window.mxdeck.invoke("sign-in", "guest")`);
-    await sleep(1500);
-    assert.equal(await cookiesIn("guest"), 1);
-    await inPanel(`window.mxdeck.invoke("sign-in", "guest-plain")`);
-    await sleep(1500);
-    assert.equal(await cookiesIn("guest-plain"), 1);
-
-    // サインイン済みの表示と、サインアウト（mxdeck の保存領域を消す）
-    const st = await inPanel(`window.mxdeck.invoke("status")`);
-    assert.deepEqual(st.local, { signedIn: true, accounts: [] });
-    assert.deepEqual(st["local-js"], { signedIn: true, accounts: ["page user"] });
-    assert.deepEqual(st.guest, { signedIn: false, accounts: [] }, "guest_id だけではサインインしていない");
-    assert.deepEqual(st["guest-plain"], { signedIn: false, accounts: [] }, "signedInWhen が無くても guest_id だけではしていない");
-    const out = await inPanel(`window.mxdeck.invoke("sign-out", "local")`);
-    assert.equal(out.ok, true);
-    assert.equal(await cookiesIn("local"), 0);
-    assert.deepEqual((await inPanel(`window.mxdeck.invoke("status")`)).local, { signedIn: false, accounts: [] });
-    assert.equal((await inPanel(`window.mxdeck.invoke("get", "local")`)).ok, false);
-    // ほかのサービスには触れない
-    assert.equal((await inPanel(`window.mxdeck.invoke("status")`))["local-js"].signedIn, true);
-
-    // 「閉じる」ボタンでパネルが閉じる
-    await inPanel(`document.getElementById("close").click()`);
-    await sleep(500);
-    const panels = await main.evaluate(
-      `${E}.BrowserWindow.getAllWindows().filter((w) => w.webContents.getURL().endsWith("panel/panel.html")).length`,
-    );
-    assert.equal(panels, 0, "閉じるボタンで閉じていない");
-
-    // パネルに渡ったものに、伏せていない値は無い
-    const seen = JSON.stringify([got, gotJs]);
-    for (const secret of [SESSION, CSRF, TOKEN]) assert.ok(!seen.includes(secret), secret);
-  } finally {
-    main.close();
-    child.kill("SIGKILL");
-    server.close();
-    server.closeAllConnections();
-    fs.rmSync(tmp, { recursive: true, force: true });
+  main = await inspector(child);
+  const E = `process.mainModule.require("electron")`;
+  // 起動を待ってから（inspector は起動処理の途中から繋がる）、プラグインのメニュー項目を押してパネルを開く
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  for (let i = 0; ; i++) {
+    await sleep(300);
+    const ready = await main
+      .evaluate(`!!process.mainModule && ${E}.app.isReady() && !!${E}.Menu.getApplicationMenu()`)
+      .catch(() => false);
+    if (ready) break;
+    if (i > 60) throw new Error("mxdeck did not start");
   }
+  await main.evaluate(`(() => {
+    const menu = ${E}.Menu.getApplicationMenu().items.find((i) => i.label === "プラグイン");
+    menu.submenu.items.find((i) => /Bridge login|ブリッジのログイン/.test(i.label)).click();
+  })()`);
+  const inPanel = (js) =>
+    main.evaluate(`(async () => {
+      for (let i = 0; i < 50; i++) {
+        const w = ${E}.BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().endsWith("panel/panel.html"));
+        if (w && !w.webContents.isLoading()) return w.webContents.executeJavaScript(${JSON.stringify(js)});
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      throw new Error("panel did not open");
+    })()`);
+
+  const init = await inPanel(`window.mxdeck.invoke("init")`);
+  assert.deepEqual(init.errors, []);
+  assert.deepEqual(init.services.map((s) => s.id).sort(), ["away", "guest", "guest-plain", "local", "local-js", "multi-a", "multi-b", "slack"]);
+
+  // サインイン前: どちらも「サインインしていない」
+  const before = await inPanel(`window.mxdeck.invoke("get", "local")`);
+  assert.equal(before.ok, false);
+  assert.match(before.message, /Local/);
+  const beforeJs = await inPanel(`window.mxdeck.invoke("get", "local-js")`);
+  assert.equal(beforeJs.ok, false);
+  assert.match(beforeJs.message, /tok/);
+
+  // サインイン（サイト用ウィンドウが /login を開き、Cookie と localStorage が入る）
+  const cookiesIn = (id) =>
+    main.evaluate(`${E}.session.fromPartition("persist:plugin-login-helper-${id}").cookies.get({}).then((c) => c.length)`);
+  await inPanel(`window.mxdeck.invoke("sign-in", "local")`);
+  await sleep(1500);
+  assert.equal(await cookiesIn("local"), 2);
+  // 保存領域はサービスごと: local でサインインしても local-js には何も入らない
+  assert.equal(await cookiesIn("local-js"), 0);
+
+  const siteWindows = (id) =>
+    main.evaluate(`${E}.BrowserWindow.getAllWindows().filter((w) =>
+      w.webContents.session === ${E}.session.fromPartition("persist:plugin-login-helper-${id}")).length`);
+  assert.equal(await siteWindows("local"), 1);
+
+  const got = await inPanel(`window.mxdeck.invoke("get", "local")`);
+  assert.equal(got.ok, true, got.message);
+  assert.equal(got.results[0].masked, "login sess***cdef csrf***3210");
+  // 取れたらサインイン用のウィンドウは閉じる。サインイン（Cookie）は残り、もう一度取れる
+  await sleep(500);
+  assert.equal(await siteWindows("local"), 0);
+  assert.equal((await inPanel(`window.mxdeck.invoke("get", "local")`)).ok, true);
+
+  await inPanel(`window.mxdeck.invoke("sign-in", "local-js")`);
+  await sleep(1500);
+  const gotJs = await inPanel(`window.mxdeck.invoke("get", "local-js")`);
+  assert.equal(gotJs.ok, true, gotJs.message);
+  assert.equal(gotJs.results[0].title, "page");
+  assert.equal(gotJs.results[0].masked, "login tok-***aaaa");
+
+  await inPanel(`window.mxdeck.invoke("sign-in", "away")`);
+  await sleep(1500);
+  const away = await inPanel(`window.mxdeck.invoke("get", "away")`);
+  assert.equal(away.ok, false, "転送先のオリジンで読んではいけない");
+  assert.match(away.message, /Away/); // 「サインインしていない」（読み取りエラーではない）
+
+  await inPanel(`window.mxdeck.invoke("sign-in", "guest")`);
+  await sleep(1500);
+  assert.equal(await cookiesIn("guest"), 1);
+  await inPanel(`window.mxdeck.invoke("sign-in", "guest-plain")`);
+  await sleep(1500);
+  assert.equal(await cookiesIn("guest-plain"), 1);
+
+  // サインイン済みの表示と、サインアウト（mxdeck の保存領域を消す）
+  const st = await inPanel(`window.mxdeck.invoke("status")`);
+  assert.deepEqual(st.local, { signedIn: true, accounts: [] });
+  assert.deepEqual(st["local-js"], { signedIn: true, accounts: ["page user"] });
+  assert.deepEqual(st.guest, { signedIn: false, accounts: [] }, "guest_id だけではサインインしていない");
+  assert.deepEqual(st["guest-plain"], { signedIn: false, accounts: [] }, "signedInWhen が無くても guest_id だけではしていない");
+  const out = await inPanel(`window.mxdeck.invoke("sign-out", "local")`);
+  assert.equal(out.ok, true);
+  assert.equal(await cookiesIn("local"), 0);
+  assert.deepEqual((await inPanel(`window.mxdeck.invoke("status")`)).local, { signedIn: false, accounts: [] });
+  assert.equal((await inPanel(`window.mxdeck.invoke("get", "local")`)).ok, false);
+  // ほかのサービスには触れない
+  assert.equal((await inPanel(`window.mxdeck.invoke("status")`))["local-js"].signedIn, true);
+
+  // 「閉じる」ボタンでパネルが閉じる
+  await inPanel(`document.getElementById("close").click()`);
+  await sleep(500);
+  const panels = await main.evaluate(
+    `${E}.BrowserWindow.getAllWindows().filter((w) => w.webContents.getURL().endsWith("panel/panel.html")).length`,
+  );
+  assert.equal(panels, 0, "閉じるボタンで閉じていない");
+
+  // パネルに渡ったものに、伏せていない値は無い
+  const seen = JSON.stringify([got, gotJs]);
+  for (const secret of [SESSION, CSRF, TOKEN]) assert.ok(!seen.includes(secret), secret);
 });
