@@ -8,7 +8,7 @@ const { BrowserWindow, clipboard } = require("electron");
 const path = require("node:path");
 const { loadAll } = require("./lib/definitions");
 const { createHash } = require("node:crypto");
-const { UserError, collect, commands, describe, signedIn } = require("./lib/run");
+const { UserError, buildable, collect, commands, describe, signedIn } = require("./lib/run");
 const { maskSecrets } = require("./lib/mask");
 const { forLocale } = require("./lib/messages");
 
@@ -60,27 +60,31 @@ exports.activate = (ctx) => {
   let refs = new Map(); // 参照番号 -> 伏せていないコマンド（パネルを閉じるまで、または取り直すまで）
   let nextRef = 1;
 
-  // サインインしているか。定義の signedInWhen の Cookie が揃っていれば（無ければ Cookie が 1 つでもあれば）「している」。
+  // サインインしているか。定義に signedInWhen があれば、その Cookie が揃っていれば「している」。
+  // 無ければ、読んだ値でコマンドが組み立てられるとき（「取得」が通るとき）。サインインを途中でやめても
+  // サービスは Cookie を置いていくので、Cookie があるだけでは「している」にしない。
   // 定義に describe があれば、どこに（誰として）サインインしているかも添える。
-  // describe は値を読む（localStorage なら画面に出さずにページを開く）ので、Cookie が変わったときだけ読み直す
-  const described = new Map(); // id -> { key, accounts }
+  // 値を読む（localStorage なら画面に出さずにページを開く）ので、Cookie が変わったときだけ読み直す
+  const described = new Map(); // id -> { key, signedIn, accounts }
   async function status(def) {
     const cookies = await ctx.sites.session(def.id).cookies.get({});
     if (!signedIn(def, cookies)) return { signedIn: false, accounts: [] };
-    if (!def.describe) return { signedIn: true, accounts: [] };
+    if (def.signedInWhen && !def.describe) return { signedIn: true, accounts: [] };
     const key = createHash("sha256")
       .update(cookies.map((c) => `${c.domain} ${c.name}=${c.value}`).sort().join("\n"))
       .digest("hex");
     const cached = described.get(def.id);
-    if (cached?.key === key) return { signedIn: true, accounts: cached.accounts };
-    let accounts = [];
+    if (cached?.key === key) return { signedIn: cached.signedIn, accounts: cached.accounts };
+    let values = null;
     try {
-      accounts = describe(def, await collect(def, readerFor(def)));
+      values = await collect(def, readerFor(def));
     } catch {
-      accounts = [];
+      values = null;
     }
-    described.set(def.id, { key, accounts });
-    return { signedIn: true, accounts };
+    const ok = def.signedInWhen ? true : values !== null && buildable(def, values);
+    const accounts = ok && values ? describe(def, values) : [];
+    described.set(def.id, { key, signedIn: ok, accounts });
+    return { signedIn: ok, accounts };
   }
   const statuses = async () =>
     Object.fromEntries(await Promise.all(loaded.services.map(async (s) => [s.id, await status(s)])));

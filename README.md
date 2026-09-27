@@ -91,7 +91,7 @@ The panel re-reads the files each time it opens. A definition with the same `id`
 |---|---|
 | `id` | Lowercase letters, digits, `-`. Names the service's storage (`persist:plugin-login-helper-<id>`), so keep it stable |
 | `signInUrl` | Opened by **Sign in**. `https` only (`http://127.0.0.1` / `localhost` for testing) |
-| `signedInWhen` | Names of cookies that exist only after signing in (e.g. `["auth_token"]` for X). The panel shows “Signed in” when all of them are in the service's storage. Without it, any cookie counts, which is wrong for services that set cookies before sign-in |
+| `signedInWhen` | Names of cookies that exist only after signing in (e.g. `["auth_token"]` for X). The panel shows “Signed in” when all of them are in the service's storage. Without it, the panel shows “Signed in” only when **Get login command** would succeed, which reads the values (and, with `read.localStorage` / `read.page`, loads a page out of sight) whenever the cookies change |
 | `read.cookies` | `key: { url, name }`. HttpOnly cookies are readable |
 | `read.localStorage` | Read by loading `url` (default `signInUrl`) out of sight. If it redirects to another origin, nothing is read. A light page on that origin (such as `/robots.txt`) avoids running the whole app |
 | `command` | `{key}` is replaced with the value read under that key. If any is missing, the panel says the user is not signed in |
@@ -201,5 +201,5 @@ mautrix に限らず、Cookie や localStorage の値でログインするブリ
 （同期で）、1 つのファイルで複数のアカウントを `id` を分けて定義できます。Cookie と localStorage を読んでひな形に埋めるだけなら JSON で書け、
 コードは要りません。読んだ値は列挙しなくても全部伏せます。
 `signedInWhen` にサインイン後にだけ置かれる Cookie の名前を並べると（X なら `["auth_token"]`）、それが全部そろったときだけ「サインイン済み」と出します。
-書かなければ Cookie が 1 つでもあれば「サインイン済み」とみなすので、サインイン前から Cookie を置くサービスでは書いてください。処理が要るときは JS で書きます（mxdeck と同じ権限で動くので、信頼できるものだけ）。
+書かなければ、「ログインコマンドを取得」が通るときだけ「サインイン済み」と出します（Cookie が変わるたびに値を読み、`localStorage` や `page` があれば画面に出さずにページを開くので、書けるなら書いてください）。処理が要るときは JS で書きます（mxdeck と同じ権限で動くので、信頼できるものだけ）。
 JS の定義では `describe` で「どこに（誰として）サインインしているか」を返せ、パネルの「サインイン済み」の横に出ます（Slack はワークスペース名）。

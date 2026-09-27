@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const { validate, loadAll } = require("../lib/definitions");
-const { collect, commands, describe, signedIn, UserError } = require("../lib/run");
+const { buildable, collect, commands, describe, signedIn, UserError } = require("../lib/run");
 const { maskSecrets } = require("../lib/mask");
 const { forLocale } = require("../lib/messages");
 const slack = require("../services/slack");
@@ -60,6 +60,19 @@ test("signedInWhen: signed in only when all the named cookies are there", () => 
   const s = validate(slack, { allowCode: true });
   assert.equal(signedIn(s, [{ domain: ".slack.com", name: "b", value: "x" }]), false);
   assert.equal(signedIn(s, [{ domain: ".slack.com", name: "d", value: "xoxd-x" }]), true);
+});
+
+test("buildable: without signedInWhen, signed in means the command can be built", async () => {
+  const def = validate({ ...example, signedInWhen: undefined }, { allowCode: false });
+  const read = (cookies) => collect(def, fakeReader({ cookies }));
+  // サインインを途中でやめると、guest_id などはあっても session が無い
+  assert.equal(buildable(def, await read({})), false);
+  assert.equal(buildable(def, await read({ "https://example.com session": "s", "https://example.com csrf_token": "c" })), true);
+  // 定義の誤り（UserError でない）は「取得」で見せるので、サインインしていないことにはしない
+  const broken = validate({ ...example, command: undefined, build: () => [{ text: "" }] }, { allowCode: true });
+  assert.equal(buildable(broken, await collect(broken, fakeReader())), true);
+  const refuses = validate({ ...slack, signedInWhen: undefined }, { allowCode: true });
+  assert.equal(buildable(refuses, await collect(refuses, fakeReader())), false);
 });
 
 test("JSON definitions cannot carry code", () => {

@@ -118,6 +118,18 @@ test("in mxdeck: sign in, then get the command; the panel never sees the full va
       command: "login {session}",
     }),
   );
+  // signedInWhen が無くても、コマンドが組み立てられなければ「サインインしていない」（サインインを途中でやめた X）
+  const guestPlainDef = path.join(tmp, "guest-plain.json");
+  fs.writeFileSync(
+    guestPlainDef,
+    JSON.stringify({
+      id: "guest-plain",
+      name: "Guest (no signedInWhen)",
+      signInUrl: `${origin}/guest`,
+      read: { cookies: { session: { url: origin, name: "session" } } },
+      command: "login {session}",
+    }),
+  );
   fs.writeFileSync(
     jsDef,
     `module.exports = {
@@ -162,7 +174,7 @@ test("in mxdeck: sign in, then get the command; the panel never sees the full va
   );
   fs.writeFileSync(
     path.join(tmp, "plugins.json"),
-    JSON.stringify({ plugins: [{ path: root, config: { services: [jsonDef, jsDef, awayDef, guestDef, { file: factoryDef, options: { accounts: ["a", "b"] } }] } }] }),
+    JSON.stringify({ plugins: [{ path: root, config: { services: [jsonDef, jsDef, awayDef, guestDef, guestPlainDef, { file: factoryDef, options: { accounts: ["a", "b"] } }] } }] }),
   );
 
   const electron = createRequire(path.join(mxdeck, "package.json"))("electron");
@@ -204,7 +216,7 @@ test("in mxdeck: sign in, then get the command; the panel never sees the full va
 
     const init = await inPanel(`window.mxdeck.invoke("init")`);
     assert.deepEqual(init.errors, []);
-    assert.deepEqual(init.services.map((s) => s.id).sort(), ["away", "guest", "local", "local-js", "multi-a", "multi-b", "slack"]);
+    assert.deepEqual(init.services.map((s) => s.id).sort(), ["away", "guest", "guest-plain", "local", "local-js", "multi-a", "multi-b", "slack"]);
 
     // サインイン前: どちらも「サインインしていない」
     const before = await inPanel(`window.mxdeck.invoke("get", "local")`);
@@ -252,12 +264,16 @@ test("in mxdeck: sign in, then get the command; the panel never sees the full va
     await inPanel(`window.mxdeck.invoke("sign-in", "guest")`);
     await sleep(1500);
     assert.equal(await cookiesIn("guest"), 1);
+    await inPanel(`window.mxdeck.invoke("sign-in", "guest-plain")`);
+    await sleep(1500);
+    assert.equal(await cookiesIn("guest-plain"), 1);
 
     // サインイン済みの表示と、サインアウト（mxdeck の保存領域を消す）
     const st = await inPanel(`window.mxdeck.invoke("status")`);
     assert.deepEqual(st.local, { signedIn: true, accounts: [] });
     assert.deepEqual(st["local-js"], { signedIn: true, accounts: ["page user"] });
     assert.deepEqual(st.guest, { signedIn: false, accounts: [] }, "guest_id だけではサインインしていない");
+    assert.deepEqual(st["guest-plain"], { signedIn: false, accounts: [] }, "signedInWhen が無くても guest_id だけではしていない");
     const out = await inPanel(`window.mxdeck.invoke("sign-out", "local")`);
     assert.equal(out.ok, true);
     assert.equal(await cookiesIn("local"), 0);
